@@ -104,8 +104,51 @@ class TrajectoryCollector:
         row_dict = {}
         
         # Process multimodal data
-        if is_multi_modal:
-            # Replace image placeholder with vision tokens
+        if is_multi_modal and "Molmo" in self.processor.__class__.__name__:
+            # Molmo2: processor handles image token insertion internally
+            raw_prompt = prompt_with_chat_template.replace('<image>', '')
+            processed = self.processor(
+                images=[process_image(obs_image)],
+                text=prompt_with_chat_template,
+                return_tensors='pt',
+            )
+            row_dict['multi_modal_inputs'] = {
+                k: v for k, v in processed.items()
+                if k not in ('input_ids', 'attention_mask')
+            }
+            row_dict['multi_modal_data'] = {'image': [process_image(obs_image)]}
+
+            # Use processor output for input_ids/attention_mask, then pad/truncate
+            proc_input_ids = processed['input_ids']  # (1, seq_len)
+            proc_attention_mask = processed['attention_mask']  # (1, seq_len)
+
+            # Pad or truncate to max_prompt_length with left padding
+            max_len = self.config.data.max_prompt_length
+            seq_len = proc_input_ids.shape[1]
+            if seq_len > max_len:
+                # Left truncation
+                proc_input_ids = proc_input_ids[:, -max_len:]
+                proc_attention_mask = proc_attention_mask[:, -max_len:]
+            elif seq_len < max_len:
+                # Left padding
+                pad_len = max_len - seq_len
+                proc_input_ids = torch.cat([
+                    torch.full((1, pad_len), self.tokenizer.pad_token_id, dtype=proc_input_ids.dtype),
+                    proc_input_ids
+                ], dim=1)
+                proc_attention_mask = torch.cat([
+                    torch.zeros((1, pad_len), dtype=proc_attention_mask.dtype),
+                    proc_attention_mask
+                ], dim=1)
+
+            input_ids = proc_input_ids
+            attention_mask = proc_attention_mask
+
+            # Standard 1D position IDs (no 3D RoPE)
+            position_ids = compute_position_id_with_mask(attention_mask)
+
+        elif is_multi_modal:
+            # Qwen2-VL / Qwen3-VL path
             raw_prompt = prompt_with_chat_template.replace('<image>', '<|vision_start|><|image_pad|><|vision_end|>')
             row_dict['multi_modal_data'] = {'image': [process_image(obs_image)]}
             image_inputs = self.processor.image_processor(row_dict['multi_modal_data']['image'], return_tensors='pt')
@@ -126,19 +169,12 @@ class TrajectoryCollector:
                 prompt_with_chat_template = prompt_with_chat_template.replace('<|placeholder|>',
                                                                                 self.processor.image_token)
 
-        else:
-            raw_prompt = prompt_with_chat_template
-        
-        input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=prompt_with_chat_template,
-                                                                            tokenizer=self.tokenizer,
-                                                                            max_length=self.config.data.max_prompt_length,
-                                                                            pad_token_id=self.tokenizer.pad_token_id,
-                                                                            left_pad=True,
-                                                                            truncation=self.config.data.truncation,)
-        
-        
-
-        if is_multi_modal:
+            input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=prompt_with_chat_template,
+                                                                                tokenizer=self.tokenizer,
+                                                                                max_length=self.config.data.max_prompt_length,
+                                                                                pad_token_id=self.tokenizer.pad_token_id,
+                                                                                left_pad=True,
+                                                                                truncation=self.config.data.truncation,)
 
             if "Qwen3VLProcessor" in self.processor.__class__.__name__:
                 from verl.models.transformers.qwen3_vl import get_rope_index
@@ -156,6 +192,14 @@ class TrajectoryCollector:
             text_position_ids[0, valid_mask] = torch.arange(valid_mask.sum().item())
             position_ids = [torch.cat((text_position_ids, vision_position_ids), dim=0)]  # (1, 4, seq_length)
         else:
+            raw_prompt = prompt_with_chat_template
+
+            input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=prompt_with_chat_template,
+                                                                                tokenizer=self.tokenizer,
+                                                                                max_length=self.config.data.max_prompt_length,
+                                                                                pad_token_id=self.tokenizer.pad_token_id,
+                                                                                left_pad=True,
+                                                                                truncation=self.config.data.truncation,)
             position_ids = compute_position_id_with_mask(attention_mask)
 
         raw_prompt_ids = self.tokenizer.encode(raw_prompt, add_special_tokens=False)

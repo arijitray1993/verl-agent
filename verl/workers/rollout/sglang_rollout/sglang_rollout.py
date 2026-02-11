@@ -31,9 +31,19 @@ import torch
 import torch.distributed as dist
 from omegaconf import DictConfig
 from sglang.srt.entrypoints.engine import Engine
-from sglang.srt.openai_api.protocol import Tool
+try:
+    from sglang.srt.openai_api.protocol import Tool
+except ModuleNotFoundError:
+    from sglang.srt.entrypoints.openai.protocol import Tool
 from sglang.srt.sampling.sampling_params import SamplingParams
-from sglang.srt.utils import get_ip, get_open_port
+try:
+    from sglang.srt.utils import get_ip, get_open_port
+except ImportError:
+    from sglang.srt.utils.common import get_open_port
+    import socket
+    def get_ip():
+        hostname = socket.gethostname()
+        return socket.gethostbyname(hostname)
 from tensordict import TensorDict
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.nn.utils.rnn import pad_sequence

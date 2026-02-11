@@ -185,7 +185,7 @@ class ActorRolloutRefWorker(Worker):
         from torch import optim
         from torch.distributed.fsdp import CPUOffload, MixedPrecision
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForImageTextToText, AutoModelForVision2Seq
 
         from verl.utils.model import get_generation_config, print_model_size, update_model_config
         from verl.utils.torch_dtypes import PrecisionType
@@ -213,6 +213,44 @@ class ActorRolloutRefWorker(Worker):
         if getattr(actor_model_config, "model_type", None) == "kimi_vl":
             actor_model_config.text_config.topk_method = "greedy"
 
+        # patch for molmo2: vLLM compatibility for processor
+        if getattr(actor_model_config, "model_type", None) == "molmo2" and self.processor is not None:
+            proc_cls = self.processor.__class__
+
+            # 1. Add image_token / image_token_id so vLLM get_dummy_text works
+            if not hasattr(self.processor, "image_token"):
+                proc_cls.image_token = property(lambda self_p: self_p.image_placeholder_token)
+            if not hasattr(self.processor, "image_token_id"):
+                proc_cls.image_token_id = property(
+                    lambda self_p: self_p.tokenizer.convert_tokens_to_ids(self_p.image_placeholder_token)
+                )
+
+            # 2. Add _get_num_multimodal_tokens for vLLM multimodal budget
+            if not hasattr(self.processor, "_get_num_multimodal_tokens"):
+                def _get_num_multimodal_tokens(self_proc, image_sizes=None, **kwargs):
+                    if image_sizes is None:
+                        return {"num_image_tokens": [], "num_image_patches": []}
+                    from PIL import Image
+
+                    num_tokens = []
+                    num_patches = []
+                    for h, w in image_sizes:
+                        dummy = Image.new("RGB", (w, h))
+                        out = self_proc(images=[dummy], text=self_proc.image_placeholder_token, return_tensors="pt")
+                        # Count only multimodal tokens (token_type_ids == True)
+                        tt = out.get("token_type_ids")
+                        if tt is not None:
+                            n = int(tt.sum().item())
+                        else:
+                            n = out["input_ids"].shape[1]
+                        num_tokens.append(n)
+                        # pixel_values shape gives patch count
+                        pv = out.get("pixel_values")
+                        num_patches.append(pv.shape[0] if pv is not None else n)
+                    return {"num_image_tokens": num_tokens, "num_image_patches": num_patches}
+
+                proc_cls._get_num_multimodal_tokens = _get_num_multimodal_tokens
+
         self.generation_config = get_generation_config(local_path, trust_remote_code=trust_remote_code)
 
         override_config_kwargs = {
@@ -232,6 +270,8 @@ class ActorRolloutRefWorker(Worker):
             warnings.simplefilter("ignore")
             if type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
                 actor_module_class = AutoModelForVision2Seq
+            elif getattr(actor_model_config, "model_type", None) == "molmo2":
+                actor_module_class = AutoModelForImageTextToText
             else:
                 actor_module_class = AutoModelForCausalLM
 
@@ -241,6 +281,13 @@ class ActorRolloutRefWorker(Worker):
                 config=actor_model_config,
                 trust_remote_code=trust_remote_code,
             )
+
+            # patch for molmo2: register inner model with AutoModel for vLLM from_config
+            if getattr(actor_model_config, "model_type", None) == "molmo2":
+                from transformers import AutoModel
+                inner_model = getattr(actor_module, "model", None)
+                if inner_model is not None:
+                    AutoModel.register(type(actor_model_config), type(inner_model))
 
             # Apply Liger kernel to the model if use_liger is set to True
             if use_liger:

@@ -229,6 +229,11 @@ def patch_forward_with_backends(
 
         forward_with_torch_backend_function = forward_with_torch_backend
         forward_with_triton_backend_function = forward_with_triton_backend
+    elif model.config.model_type == "molmo2":
+        from verl.models.transformers.molmo2 import forward_with_torch_backend, forward_with_triton_backend
+
+        forward_with_torch_backend_function = forward_with_torch_backend
+        forward_with_triton_backend_function = forward_with_triton_backend
     else:
         from verl.models.transformers.dense_common import forward_with_torch_backend, forward_with_triton_backend
 
@@ -395,6 +400,16 @@ def apply_monkey_patch(
         # Step 3: patch input for multimodal sequence parallelism
         if ulysses_sp_size > 1:
             patch_vlm_for_ulysses_input_slicing(Glm4vTextModel)
+
+    elif model.config.model_type == "molmo2":
+        # Molmo2 uses trust_remote_code, so get classes from the model instance
+        from verl.models.transformers.molmo2 import forward_with_normal_backend
+
+        model.__class__.forward = forward_with_normal_backend
+        print(f"Monkey patch {model.__class__.__name__} model forward")
+
+        if ulysses_sp_size > 1:
+            patch_vlm_for_ulysses_input_slicing(model.model.__class__)
 
     elif model.config.model_type == "kimi_vl":
         if use_remove_padding or ulysses_sp_size > 1:

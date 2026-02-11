@@ -221,6 +221,9 @@ pip3 install flash-attn==2.7.4.post1 --no-build-isolation --no-cache-dir
 pip install -e .
 ```
 
+## Molmo2-4B Support
+For integrating and training with [Molmo2-4B](https://huggingface.co/allenai/Molmo2-4B) (vision-language model), see the [Molmo2 Integration Guide](./Molmo2_readme.md).
+
 ## Install Supported Environments
 > ⚠️ **Important:** 
 To run an agent in any of these environments, you must first install and configure the corresponding environment. We strongly recommend installing ***each environment in its own dedicated conda environment*** to avoid potential package version conflicts.
@@ -391,6 +394,9 @@ bash examples/gigpo_trainer/run_search.sh # Search
 ```
 ```bash
 bash examples/gigpo_trainer/run_sokoban.sh # Sokoban
+```
+```bash
+bash examples/gigpo_trainer/run_alfworld_molmo2.sh # ALFWorld (Molmo2-4B vision-language)
 ```
 ### 2. GRPO
 GRPO is a critic-free algorithm that estimates relative advantages based on a group of full episode trajectories.

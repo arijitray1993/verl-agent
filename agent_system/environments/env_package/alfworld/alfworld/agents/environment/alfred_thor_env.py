@@ -12,6 +12,56 @@ import alfworld.agents
 from alfworld.agents.utils.misc import get_templated_task_desc
 from alfworld.env.thor_env import ThorEnv
 from alfworld.agents.expert import HandCodedThorAgent, HandCodedAgentTimeout
+
+# Monkey-patch Controller to use CloudRendering when no X display is available
+if not os.environ.get('DISPLAY'):
+    import ai2thor.platform as _ai2thor_platform
+    from ai2thor.controller import Controller as _Controller
+    _orig_ctrl_init = _Controller.__init__
+    def _ctrl_init_cloudrendering(self, *args, **kwargs):
+        kwargs.setdefault('platform', _ai2thor_platform.CloudRendering)
+        return _orig_ctrl_init(self, *args, **kwargs)
+    _Controller.__init__ = _ctrl_init_cloudrendering
+
+# Monkey-patch ThorEnv.step to handle string actions (ai2thor compat)
+# Newer ai2thor calls self.step(action="GetScenesInBuild") during __init__,
+# but alfworld's ThorEnv.step expects action to be a dict with 'action' key.
+_orig_thor_step = ThorEnv.step
+def _compatible_thor_step(self, action, smooth_nav=False, **kwargs):
+    if isinstance(action, str) or kwargs:
+        from ai2thor.controller import Controller as _Ctrl
+        return _Ctrl.step(self, action=action, **kwargs)
+    return _orig_thor_step(self, action, smooth_nav=smooth_nav)
+ThorEnv.step = _compatible_thor_step
+
+# Monkey-patch ThorEnv.reset to handle calls before __init__ finishes.
+# Newer ai2thor's Controller.__init__ calls self.reset() before ThorEnv
+# sets self.task, self.cleaned_objects, etc.
+_orig_thor_reset = ThorEnv.reset
+def _safe_thor_reset(self, *args, **kwargs):
+    if not hasattr(self, 'task'):
+        self.task = None
+    if not hasattr(self, 'cleaned_objects'):
+        self.cleaned_objects = set()
+        self.cooled_objects = set()
+        self.heated_objects = set()
+    if not hasattr(self, 'save_frames_to_disk'):
+        self.save_frames_to_disk = False
+        self.save_frames_path = "./"
+    return _orig_thor_reset(self, *args, **kwargs)
+ThorEnv.reset = _safe_thor_reset
+
+# Monkey-patch Controller.start to skip if server already started.
+# Newer ai2thor's Controller.__init__ calls start(), then ThorEnv.__init__
+# calls start() again redundantly, which kills and restarts the Unity process.
+from ai2thor.controller import Controller as _Controller2
+_orig_ctrl_start = _Controller2.start
+def _skip_if_started(self, *args, **kwargs):
+    if hasattr(self, 'server') and self.server is not None and self.server.started:
+        return
+    return _orig_ctrl_start(self, *args, **kwargs)
+_Controller2.start = _skip_if_started
+
 from alfworld.agents.detector.mrcnn import load_pretrained_model
 from alfworld.agents.controller import OracleAgent, OracleAStarAgent, MaskRCNNAgent, MaskRCNNAStarAgent
 

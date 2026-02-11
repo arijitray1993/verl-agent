@@ -630,7 +630,7 @@ def make_envs(config):
     elif "alfworld" in config.env.env_name.lower():
         from agent_system.environments.env_package.alfworld import build_alfworld_envs, alfworld_projection
         if config.env.env_name == 'alfworld/AlfredThorEnv':
-            alf_config_path = os.path.join(os.path.dirname(__file__), 'env_package/alfworld/configs/config_tw.yaml')
+            alf_config_path = os.path.join(os.path.dirname(__file__), 'env_package/alfworld/configs/config_thor.yaml')
         elif config.env.env_name == 'alfworld/AlfredTWEnv':
             alf_config_path = os.path.join(os.path.dirname(__file__), 'env_package/alfworld/configs/config_tw.yaml')
         else:
