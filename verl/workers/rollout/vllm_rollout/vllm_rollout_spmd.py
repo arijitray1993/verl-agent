@@ -39,6 +39,13 @@ from omegaconf import DictConfig, OmegaConf, ListConfig
 from tensordict import TensorDict
 from vllm import LLM, SamplingParams
 from vllm.distributed import parallel_state as vllm_ps
+from vllm.model_executor.models import ModelRegistry
+
+# Register Molmo2 model before vLLM engine initialization
+ModelRegistry.register_model(
+    "Molmo2ForConditionalGeneration",
+    "verl.workers.rollout.vllm_rollout.models.molmo2:Molmo2ForConditionalGeneration"
+)
 
 from verl import DataProto
 from verl.third_party.vllm import vllm_version

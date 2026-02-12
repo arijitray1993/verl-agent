@@ -1,6 +1,6 @@
+# run as: bash examples/gigpo_trainer/run_alfworld_molmo2.sh
 set -x
-ENGINE=${1:-sglang}
-export VLLM_ATTENTION_BACKEND=TORCH_SDPA
+ENGINE=${1:-vllm}
 
 num_cpus_per_env_worker=0.1 # The CPU resource allocated for each environment worker.
 
@@ -66,7 +66,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_alfworld_visual' \
     trainer.experiment_name='gigpo_molmo2_4b_visual' \
-    trainer.n_gpus_per_node=2 \
+    trainer.n_gpus_per_node=4 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \
